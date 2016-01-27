@@ -35,6 +35,20 @@
     <name>Apache Karaf</name>
     <inceptionYear>2007</inceptionYear>
 
+    <!--CITC Repo-->
+    <distributionManagement>
+        <repository>
+            <id>CITCMain</id>
+            <name>CITC Main repo</name>
+            <url>https://maven1.citc.ru/content/repositories/citc-main</url>
+        </repository>
+        <snapshotRepository>
+            <id>CITCMainSnapshots</id>
+            <name>CITC Main snapshots repo</name>
+            <url>https://maven1.citc.ru/content/repositories/citc-snapshot</url>
+        </snapshotRepository>
+    </distributionManagement>
+
     <modules>
         <module>util</module>
         <module>main</module>
