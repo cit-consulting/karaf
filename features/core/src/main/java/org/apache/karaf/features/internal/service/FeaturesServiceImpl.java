@@ -102,6 +102,7 @@ import static org.apache.karaf.features.internal.util.MapUtils.*;
 public class FeaturesServiceImpl implements FeaturesService, Deployer.DeployCallback {
 
     private static final String RESOLVE_FILE = "resolve";
+    private static final String FEATURE_REGION_SEPARATOR = ":";
     private static final Logger LOGGER = LoggerFactory.getLogger(FeaturesServiceImpl.class);
 
     /**
@@ -786,34 +787,52 @@ public class FeaturesServiceImpl implements FeaturesService, Deployer.DeployCall
 
     @Override
     public void installFeatures(Set<String> featuresIn, String region, EnumSet<Option> options) throws Exception {
-        Set<FeatureReq> toInstall = map(featuresIn, FeatureReq::parseNameAndRange);
         State state = copyState();
         Map<String, Set<String>> requires = copy(state.requirements);
         if (region == null || region.isEmpty()) {
             region = ROOT_REGION;
         }
-        Set<String> requirements = requires.computeIfAbsent(region, k -> new HashSet<>());
-        Set<FeatureReq> existingFeatures = map(requirements, FeatureReq::parseRequirement);
-
-        Set<FeatureReq> toAdd = computeFeaturesToAdd(options, toInstall);
-        toAdd.forEach(f -> {
-            if (f.isBlacklisted()) {
-                print("Skipping blacklisted feature: " + f, options.contains(Option.Verbose));
-            } else {
-                requirements.add(f.toRequirement());
+        Map<String, Set<FeatureReq>> featureReqsToInstall = new HashMap<>();
+        for (String featureSpec : featuresIn) {
+            String regionToInstall = region;
+            String featureToInstall = featureSpec;
+            if (featureSpec.contains(FEATURE_REGION_SEPARATOR)) {
+                String[] regionToFeature = featureSpec.split(FEATURE_REGION_SEPARATOR, 2);
+                regionToInstall = regionToFeature[0];
+                featureToInstall = regionToFeature[1];
+            }
+            featureReqsToInstall.computeIfAbsent(regionToInstall, key -> new HashSet<>())
+                    .add(FeatureReq.parseNameAndRange(featureToInstall));
+        }
+        List<FeatureReq> notBlacklisted = new ArrayList<>(featuresIn.size());
+        featureReqsToInstall.forEach((reg, features) -> {
+            for (FeatureReq featureReq : features) {
+                if (featureReq.isBlacklisted()) {
+                    print("Skipping blacklisted feature: " + featureReq, options.contains(Option.Verbose));
+                } else {
+                    notBlacklisted.add(featureReq);
+                    requires.computeIfAbsent(reg, key -> new HashSet<>()).add(featureReq.toRequirement());
+                }
             }
         });
-        List<FeatureReq> notBlacklisted = toAdd.stream()
-                .filter(fr -> !fr.isBlacklisted()).collect(Collectors.toList());
         if (notBlacklisted.size() > 0) {
             print("Adding features: " + join(notBlacklisted), options.contains(Option.Verbose));
         }
 
         if (options.contains(Option.Upgrade)) {
-            Set<FeatureReq> toRemove = computeFeaturesToRemoveOnUpdate(toAdd, existingFeatures);
-            toRemove.forEach(f -> requirements.remove(f.toRequirement()));
-            if (!toRemove.isEmpty()) {
-                print("Removing features: " + join(toRemove), options.contains(Option.Verbose));
+            Set<FeatureReq> upgradedFeatures = new HashSet<>();
+            for (Map.Entry<String, Set<String>> regionToFeatures : requires.entrySet()) {
+                final Set<String> installedFeatures = regionToFeatures.getValue();
+                Set<FeatureReq> existingFeatures = map(installedFeatures, FeatureReq::parseRequirement);
+                Set<FeatureReq> newFeatures = featureReqsToInstall.get(regionToFeatures.getKey());
+                if (newFeatures != null) {
+                    Set<FeatureReq> toRemove = computeFeaturesToRemoveOnUpdate(newFeatures, existingFeatures);
+                    toRemove.forEach(f -> installedFeatures.remove(f.toRequirement()));
+                    upgradedFeatures.addAll(toRemove);
+                }
+            }
+            if (!upgradedFeatures.isEmpty()) {
+                print("Removing features: " + join(upgradedFeatures), options.contains(Option.Verbose));
             }
         }
 
